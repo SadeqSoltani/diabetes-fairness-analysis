@@ -1,0 +1,759 @@
+---
+title: "Fairness Analysis"
+output: html_notebook
+---
+
+#libraries and load dataset
+
+```{r}
+library(tidyverse)
+library(ggplot2)    
+library(corrplot)    
+library(caret)       
+library(glmnet)     
+library(pROC)
+library(car)  
+library(gtsummary)
+library(scales)
+library(patchwork)
+library(RColorBrewer)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(xgboost)
+library(fairness)
+```
+
+
+```{r}
+mydata <- read.csv("Pima Indians Diabetes.csv")
+```
+
+
+#dataset overview:
+
+
+```{r}
+summary(mydata)
+```
+```{r}
+mydata %>%
+  summarise(across(where(is.numeric), list(
+    `Data Type` = ~class(.),
+    `Distinct Values` = ~n_distinct(.),
+    `Mean` = ~mean(., na.rm = TRUE),
+    `Median` = ~median(., na.rm = TRUE),
+    `Std Dev` = ~sd(., na.rm = TRUE),
+    `Min` = ~min(., na.rm = TRUE),
+    `Max` = ~max(., na.rm = TRUE),
+    `Q1` = ~quantile(., 0.25, na.rm = TRUE),  # First Quartile (Q1)
+    `Q3` = ~quantile(., 0.75, na.rm = TRUE)   # Third Quartile (Q3)
+  ))) %>%
+  pivot_longer(cols = everything(), names_to = c("Column", ".value"), names_sep = "_")
+
+
+
+```
+
+
+
+#Data Preparation: 
+
+##change variable type
+
+
+```{r}
+mydata$diabetes <- factor(mydata$diabetes, levels = c(0, 1), labels = c("No", "Yes"))
+```
+
+```{r}
+library(dplyr)
+
+# Create a summary of diabetes type and its levels
+diabetes_levels <- data.frame(
+  Main_Level = c(1, 0),            # Main levels (1 and 0)
+  Diabetes_level = c("Yes", "No"), # Diabetes level (Yes for 1, No for 0)
+  Level = c("Diabetic", "Non-Diabetic")  # Descriptive level (Diabetic and Non-Diabetic)
+)
+
+# Print the table
+print(diabetes_levels)
+
+
+
+
+
+```
+
+
+##NA values
+
+```{r}
+missing_values <- colSums(is.na(mydata))
+print(missing_values)
+
+```
+```{r}
+# Calculate the number of missing values in each column
+missing_values <- colSums(is.na(mydata))
+
+# Create a data frame for better visualization
+missing_values_table <- data.frame(
+  Column = names(missing_values),
+  Missing_Values = missing_values
+)
+
+# Print the table
+print(missing_values_table)
+
+```
+
+##Count zero values:
+
+```{r}
+zero_counts <- sapply(mydata[ , sapply(mydata, is.numeric)], function(x) sum(x == 0, na.rm = TRUE))
+
+zero_summary <- data.frame(Variable = names(zero_counts), Zero_Count = zero_counts)
+
+print(zero_summary)
+
+```
+
+
+##Remove zeros:
+
+```{r}
+invalid_zero_vars <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI")
+mydata[invalid_zero_vars] <- lapply(mydata[invalid_zero_vars], function(x) {
+  x[x == 0] <- NA
+  return(x)
+})
+
+mydata[invalid_zero_vars] <- lapply(mydata[invalid_zero_vars], function(x) {
+  x[is.na(x)] <- median(x, na.rm = TRUE)
+  return(x)
+})
+
+colSums(is.na(mydata[invalid_zero_vars]))
+
+
+
+```
+
+##outliers:
+
+
+```{r}
+count_outliers <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE) 
+  Q3 <- quantile(x, 0.75, na.rm = TRUE) 
+  IQR_value <- Q3 - Q1                  
+  lower_bound <- Q1 - 1.5 * IQR_value     
+  upper_bound <- Q3 + 1.5 * IQR_value 
+  
+  sum(x < lower_bound | x > upper_bound, na.rm = TRUE)
+}
+
+outlier_summary <- mydata %>%
+  summarise(across(where(is.numeric), count_outliers, .names = "Outliers_in_{.col}"))
+
+print(outlier_summary)
+
+```
+
+
+# descriptive analytics
+
+
+##pie chart for distribution of patients
+
+
+```{r}
+mydata %>%
+  count(diabetes) %>%
+  mutate(percentage = n / sum(n) * 100) %>%
+  ggplot(aes(x = "", y = percentage, fill = diabetes)) +
+  geom_bar(stat = "identity", width = 2, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = paste0(diabetes, "\n", round(percentage, 1), "%")),
+            position = position_stack(vjust = 0.5), size = 7) +  
+  scale_fill_manual(values = c("No" = "red", "Yes" = "green")) +
+  labs(title = "Proportion of Diabetes Cases", x = "", y = "") +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+
+```
+
+
+#Distribution of predictors:
+
+
+```{r}
+
+mydata_dist <- mydata %>%
+  select(Pregnancies, Glucose, BloodPressure, SkinThickness, 
+         Insulin, BMI, DiabetesPedigreeFunction, Age) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Value")
+
+ggplot(mydata_dist, aes(x = Value)) +
+  geom_histogram(aes(y = ..density..), 
+                 fill = "blue", color = "white", bins = 60, alpha = 0.5) +
+  geom_density(color = "black", size = 1) +
+  facet_wrap(~Variable, scales = "free", ncol = 4) +
+  labs(title = "Distribution of Predictors", x = NULL, y = "Density") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+
+```
+
+
+
+#correlation matrix:
+
+
+```{r}
+
+numeric_data <- mydata %>%
+  select(where(is.numeric))
+
+cor_matrix <- cor(numeric_data, use = "complete.obs")
+
+corrplot(cor_matrix,
+         method = "color",        
+         type = "lower",          
+         addCoef.col = "black", 
+         tl.col = "black",        
+         tl.cex = 0.8,        
+         number.cex = 0.65,     
+         col = colorRampPalette(c("red", "white", "blue"))(200),  
+         title = "Correlation Matrix of Predictors",
+         mar =c(0, 0, 0, 0)) 
+
+
+```
+
+
+
+# Predictor's corelation to Age with trendlines:
+
+
+```{r}
+mydata_trend <- mydata %>%
+pivot_longer(cols = c(Glucose, BloodPressure, Insulin, BMI),
+               names_to = "Variable", values_to = "Value")
+
+ggplot(mydata_trend, aes(x = Age, y = Value)) +
+geom_point(alpha = 0.4) +
+stat_smooth(method = "lm", aes(color = "linear"), se = FALSE) +
+stat_smooth(method = "lm", formula = y ~ poly(x, 2), aes(color = "polynomial"), se = FALSE) +
+stat_smooth(method = "nls",
+              formula = y ~ a * log(x) + b,
+              method.args = list(start = list(a = 1, b = 1)),
+              aes(color = "logarithmic"), se = FALSE) +
+
+  facet_wrap(~ Variable, scales = "free_y") +
+  scale_colour_brewer(name = "Trendline", palette = "Set1") +
+  labs(title = "Relationships Between Age and Key Health Predictors (Glucose, Blood Pressure, Insulin, BMI) with Trendlines"
+,x = "Age", y = "Value") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+```
+
+
+
+#Distribution of patients to have a overvview befor applying the bias evaluation
+
+
+```{r}
+
+mydata_long <- mydata %>%
+  pivot_longer(cols = c(Age, Pregnancies, BMI, SkinThickness, BloodPressure, 
+                        Insulin, DiabetesPedigreeFunction, Glucose), 
+               names_to = "Variable", 
+               values_to = "Value")
+
+mydata_long %>%
+  ggplot(aes(x = Value, fill = diabetes, color = diabetes)) +
+  geom_density(alpha = 0.3) +
+  facet_wrap(~Variable, scales = "free", ncol = 4) +   # Faceting the plots
+  labs(title = "Distribution of Predictors by Diabetes Outcome", 
+       x = NULL, y = "Density") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+```
+
+
+
+#Logestic regresion:(linear model)
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(mydata$diabetes, p = 0.8, list = FALSE)
+train <- mydata[trainIndex, ]
+test  <- mydata[-trainIndex, ]
+```
+
+
+```{r}
+train_control <- trainControl(
+  method = "repeatedcv",  
+  number = 10,             
+  repeats = 5,             
+  classProbs = TRUE,       
+  summaryFunction = twoClassSummary
+)
+
+```
+
+
+```{r}
+logistic_model <- train(
+  diabetes ~ .,              
+  data = train,              
+  method = "glm",            
+  family = "binomial",       
+  trControl = train_control, 
+  metric = "ROC"            
+)
+```
+
+
+
+```{r}
+logistic_model$results
+```
+
+
+```{r}
+test$pred_lr <- predict(logistic_model, test)                        
+test$prob_lr <- predict(logistic_model, test, type = "prob")
+
+```
+
+
+```{r}
+confusionMatrix_lr <-confusionMatrix(test$pred_lr, test$diabetes, positive = "Yes")
+confusionMatrix_lr
+```
+
+
+
+```{r}
+roc_curve_logestic <- roc(test$diabetes, test$prob_lr$Yes)
+plot(roc_curve_logestic, col = "blue", main = "ROC_AUC Curve (Logestic Regression)", print.auc = TRUE)
+
+```
+
+
+#fairness analyses in logestic regression model:
+
+
+
+```{r message=FALSE, warning=FALSE}
+roc_auc_par_lr <- roc_parity(data         = test, 
+                      outcome      = "diabetes", 
+                      group        = "Age",
+                      probs        = test$prob_lr$Yes, 
+                     group_breaks = c(20, 35, 55, 80))
+
+
+roc_auc_par_lr$Metric
+
+```
+
+```{r}
+roc_auc_par_lr$ROCAUC_plot + 
+  ggtitle("ROC AUC Comparison by Group (Logistic Regression Model)") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+
+```
+
+
+
+##Predictive rate parity:
+
+```{r}
+pred_par_lr <- pred_rate_parity(
+  data = test,                     
+  outcome = "diabetes",           
+  outcome_base = "Yes",           
+  group = "Age",                  
+  probs = test$prob_lr$Yes,  
+  cutoff = 0.5,                    
+   group_breaks = c(20, 40, 60, 81) 
+)
+
+pred_par_lr$Metric
+
+```
+
+
+```{r}
+pred_par_lr$Metric_plot
+
+```
+
+##Demographic parity:
+
+```{r}
+dem_par_lr <- dem_parity(data         = test, 
+                      outcome      = "diabetes",
+                      outcome_base = "Yes", 
+                      group        = "Age",                  
+                      probs        = test$prob_lr$No,      
+                      cutoff       = 0.5,                   
+                      group_breaks = c(20, 40, 60, 81))    
+
+dem_par_lr$Metric
+```
+
+```{r}
+levels(pred_par_lr$Group)
+
+```
+
+
+##Accuracy parity
+
+
+```{r}
+acc_par_lr <- acc_parity(data    = test, 
+                      outcome = "diabetes", 
+                      group   = "Age",
+                      probs   = test$prob_lr$Yes, 
+                      cutoff  = 0.5, 
+                       group_breaks = c(20, 40, 60, 81))
+acc_par_lr$Metric
+```
+
+##Specificity parity:
+
+```{r}
+sp_par_lr <- spec_parity(data         = test, 
+                      outcome      = "diabetes", 
+                      outcome_base = 'Yes', 
+                      group        = "Age",
+                      probs        = test$prob_lr$Yes, 
+                      cutoff       = 0.5, 
+                      group_breaks = c(20, 40, 60, 81))
+sp_par_lr$Metric
+```
+
+
+#Random forest:
+
+
+```{r}
+rf_model <- train(
+  diabetes ~ ., 
+  data = train, 
+  method = "rf",
+  metric = "ROC",
+  trControl = train_control,
+  tuneLength = 7,
+  ntree=400
+  
+)
+
+print(rf_model)
+```
+
+
+```{r}
+rf_model$results
+```
+
+
+```{r}
+test$pred_rf <- predict(rf_model, test)                        
+test$prob_rf <- predict(rf_model, test, type = "prob")
+
+```
+
+
+
+```{r}
+confusionMatrix_rf <-confusionMatrix(test$pred_rf, test$diabetes, positive = "Yes")
+confusionMatrix_rf
+```
+
+
+
+```{r}
+roc_curve_rf <- roc(test$diabetes, test$prob_rf$Yes)
+plot(roc_curve_rf, col = "blue", main = "ROC_AUC Curve(Random Forest)", print.auc = TRUE)
+
+```
+
+#fairness analyses in random forest model:
+
+```{r warning=FALSE}
+roc_auc_par_rf <- roc_parity(data         = test, 
+                      outcome      = "diabetes", 
+                      group        = "Age",
+                      probs        = test$prob_rf$Yes, 
+                     group_breaks = c(20, 35, 55, 81))
+roc_auc_par_rf$Metric
+```
+
+
+
+```{r}
+roc_auc_par_rf$ROCAUC_plot + 
+  ggtitle("ROC AUC Comparison by Group (Random Forest Model)") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+
+```
+
+
+
+##Predictive rate parity
+
+```{r}
+pred_par_rf <- pred_rate_parity(
+  data = test,                     
+  outcome = "diabetes",           
+  outcome_base = "Yes",           
+  group = "Age",                  
+  probs = test$prob_rf$Yes,  
+  cutoff = 0.5,                    
+   group_breaks = c(20, 40, 60, 81) 
+)
+pred_par_rf$Metric
+
+```
+
+```{r}
+pred_par_rf$Metric_plot
+
+```
+
+
+##Demographic parity
+
+
+```{r}
+dem_par_rf <- dem_parity(data      = test, 
+                      outcome      = "diabetes",
+                      outcome_base = "Yes", 
+                      group        = "Age",                  
+                      probs        = test$prob_rf$Yes,      
+                      cutoff       = 0.5,                   
+                      group_breaks = c(20, 40, 60, 81))    
+
+
+dem_par_rf$Metric
+```
+
+
+##Accuracy parity
+
+
+```{r}
+acc_par_rf <- acc_parity(data    = test, 
+                      outcome = "diabetes", 
+                      group   = "Age",
+                      probs   = test$prob_rf$Yes, 
+                      cutoff  = 0.5, 
+                       group_breaks = c(20, 40, 60, 81))
+acc_par_rf$Metric
+```
+
+
+##Specificity parity
+
+```{r}
+sp_par_rf <- spec_parity(data         = test, 
+                      outcome      = "diabetes", 
+                      outcome_base = 'Yes', 
+                      group        = "Age",
+                      probs        = test$prob_rf$Yes, 
+                      cutoff       = 0.5, 
+                      group_breaks = c(20, 40, 60, 81))
+sp_par_rf$Metric
+```
+
+
+
+#XGB:
+
+
+```{r}
+XGB_model <- train(
+  diabetes ~ .,            
+  data = train,            
+  method = "xgbTree",     
+  trControl = train_control,
+  tuneLength = 3,          
+  metric = "ROC"
+)
+
+print(XGB_model)
+print(XGB_model$bestTune)
+```
+
+
+```{r}
+
+test$xgb_pred <- predict(XGB_model, test)
+test$xgb_prob <- predict(XGB_model, test, type = "prob")
+confusionMatrix(test$xgb_pred, test$diabetes, positive = "Yes")
+```
+
+
+
+```{r}
+roc_curve_xgb <- roc(test$diabetes,test$xgb_prob$Yes)
+plot(roc_curve_xgb, col = "blue", main = "ROC_AUC Curve(XGB Model)", print.auc = TRUE)
+
+```
+##Fairness analysis for XGB:
+
+
+```{r warning=FALSE}
+roc_auc_par_xgb <- roc_parity(data         = test, 
+                      outcome      = "diabetes", 
+                      group        = "Age",
+                      probs        = test$xgb_prob$Yes, 
+                     group_breaks = c(20, 35, 55, 81))
+roc_auc_par_xgb$Metric
+```
+```{r}
+roc_auc_par_xgb$ROCAUC_plot + 
+  ggtitle("ROC AUC Comparison by Group (XGBoost Model)") +
+  theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))
+```
+
+
+##Predictive rate parity
+
+```{r}
+pred_par_xgb <- pred_rate_parity(
+  data = test,                     
+  outcome = "diabetes",           
+  outcome_base = "Yes",           
+  group = "Age",                  
+  probs = test$xgb_prob$Yes,  
+  cutoff = 0.5,                    
+   group_breaks = c(20, 40, 60, 81) 
+)
+pred_par_xgb$Metric
+
+```
+
+```{r}
+pred_par_xgb$Metric_plot
+
+```
+
+
+##Demographic parity
+
+
+```{r}
+dem_par_xgb <- dem_parity(data      = test, 
+                      outcome      = "diabetes",
+                      outcome_base = "Yes", 
+                      group        = "Age",                  
+                      probs        = test$xgb_prob$Yes,      
+                      cutoff       = 0.5,                   
+                      group_breaks = c(20, 40, 60, 81))    
+
+
+dem_par_xgb$Metric
+```
+
+
+##Accuracy parity
+
+
+```{r}
+acc_par_xgb <- acc_parity(data    = test, 
+                      outcome = "diabetes", 
+                      group   = "Age",
+                      probs   = test$xgb_prob$Yes, 
+                      cutoff  = 0.5, 
+                       group_breaks = c(20, 40, 60, 81))
+acc_par_xgb$Metric
+```
+
+
+##Specificity parity
+
+```{r}
+sp_par_xgb <- spec_parity(data         = test, 
+                      outcome      = "diabetes", 
+                      outcome_base = 'Yes', 
+                      group        = "Age",
+                      probs        = test$xgb_prob$Yes, 
+                      cutoff       = 0.5, 
+                      group_breaks = c(20, 40, 60, 81))
+sp_par_xgb$Metric
+```
+
+
+# feature importance: 
+
+
+```{r}
+feature_importance_lr <- varImp(logistic_model)
+print(feature_importance_lr)
+```
+
+
+
+```{r}
+feature_importance_rf <- varImp(rf_model)
+print(feature_importance_rf)
+```
+
+
+```{r}
+feature_importance_xgb <- varImp(XGB_model)
+print(feature_importance_xgb)
+```
+
+
+
+```{r}
+
+logistic_importance_sorted <- feature_importance_lr$importance[,1][order(feature_importance_lr$importance[,1], decreasing = FALSE)]
+logistic_features_sorted <- rownames(feature_importance_lr$importance)[order(feature_importance_lr$importance[,1], decreasing = FALSE)]
+
+barplot(logistic_importance_sorted, 
+        names.arg = logistic_features_sorted, 
+        main = "Feature Importance - Logistic Regression", 
+        col = "skyblue", 
+        horiz = TRUE, 
+        las = 1, 
+        cex.names = 0.5)
+
+rf_importance_sorted <- feature_importance_rf$importance[,1][order(feature_importance_rf$importance[,1], decreasing = FALSE)]
+rf_features_sorted <- rownames(feature_importance_rf$importance)[order(feature_importance_rf$importance[,1], decreasing = FALSE)]
+
+barplot(rf_importance_sorted, 
+        names.arg = rf_features_sorted, 
+        main = "Feature Importance - Random Forest", 
+        col = "lightgreen", 
+        horiz = TRUE, 
+        las = 1, 
+        cex.names = 0.5)
+
+xgb_importance_sorted <- feature_importance_xgb$importance[,1][order(feature_importance_xgb$importance[,1], decreasing = FALSE)]
+xgb_features_sorted <- rownames(feature_importance_xgb$importance)[order(feature_importance_xgb$importance[,1], decreasing = FALSE)]
+
+barplot(xgb_importance_sorted, 
+        names.arg = xgb_features_sorted, 
+        main = "Feature Importance - XGB", 
+        col = "lightcoral", 
+        horiz = TRUE, 
+        las = 1, 
+        cex.names = 0.5)
+
+```
+
+
