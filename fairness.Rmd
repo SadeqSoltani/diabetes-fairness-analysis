@@ -3,7 +3,7 @@ title: " fairness in Diabetes prediction"
 output: html_notebook
 ---
 =================================
-## 1. libraries and load dataset:
+# 1. libraries and load dataset:
 =================================
 
 ```{r}
@@ -33,7 +33,7 @@ mydata <- read.csv("Pima Indians Diabetes.csv")
 =============================================================================================================================================================================================================================
 
 =========================
-## 2. Dataset overview:
+# 2. Dataset overview:
 ==========================
 
 ```{r}
@@ -58,7 +58,7 @@ mydata %>%
 =============================================================================================================================================================================================================================
 
 =======================
-## 3. Data Preparation: 
+# 3. Data Preparation: 
 ========================
 
 
@@ -166,7 +166,7 @@ print(outlier_summary)
 ===========================================================================================================================================================================================================================
 
 ============================
-## 4. Descriptive analytics:
+# 4. Descriptive analytics:
 ============================
 
 
@@ -289,7 +289,7 @@ mydata_long %>%
 ============================================================================================================================================================================================================================
 
 =============================================
-## 5. Predictive Analysis and fairbess metrices: 
+# 5. Predictive Analysis and fairbess metrices: 
 =============================================
 
 -------------------------
@@ -359,7 +359,7 @@ plot(roc_curve_logestic, col = "blue", main = "ROC_AUC Curve (Logestic Regressio
 -------------------------------------------------------
 
 
-## ROC-AUC parity:
+### ROC-AUC parity:
 
 ```{r message=FALSE, warning=FALSE}
 roc_auc_par_lr <- roc_parity(data         = test, 
@@ -382,7 +382,7 @@ roc_auc_par_lr$ROCAUC_plot +
 
 
 
-## Predictive rate parity:
+### Predictive rate parity:
 
 ```{r}
 pred_par_lr <- pred_rate_parity(
@@ -405,7 +405,7 @@ pred_par_lr$Metric_plot
 
 ```
 
-## Demographic parity:
+### Demographic parity:
 
 ```{r}
 dem_par_lr <- dem_parity(data         = test, 
@@ -425,7 +425,7 @@ levels(pred_par_lr$Group)
 ```
 
 
-## Accuracy parity
+### Accuracy parity
 
 
 ```{r}
@@ -438,7 +438,7 @@ acc_par_lr <- acc_parity(data    = test,
 acc_par_lr$Metric
 ```
 
-## Specificity parity:
+### Specificity parity:
 
 ```{r}
 sp_par_lr <- spec_parity(data         = test, 
@@ -501,7 +501,7 @@ plot(roc_curve_rf, col = "blue", main = "ROC_AUC Curve(Random Forest)", print.au
 5.2.2 fairness analyses for random forest model:
 --------------------------------------------------
 
-## ROC-AUC parity:
+### ROC-AUC parity:
 
 ```{r warning=FALSE}
 roc_auc_par_rf <- roc_parity(data         = test, 
@@ -523,7 +523,7 @@ roc_auc_par_rf$ROCAUC_plot +
 
 
 
-## Predictive rate parity
+### Predictive rate parity:
 
 ```{r}
 pred_par_rf <- pred_rate_parity(
@@ -545,7 +545,7 @@ pred_par_rf$Metric_plot
 ```
 
 
-## Demographic parity
+### Demographic parity
 
 
 ```{r}
@@ -562,7 +562,7 @@ dem_par_rf$Metric
 ```
 
 
-## Accuracy parity
+### Accuracy parity:
 
 
 ```{r}
@@ -576,7 +576,7 @@ acc_par_rf$Metric
 ```
 
 
-## Specificity parity
+### Specificity parity
 
 ```{r}
 sp_par_rf <- spec_parity(data         = test, 
@@ -628,7 +628,7 @@ plot(roc_curve_xgb, col = "blue", main = "ROC_AUC Curve(XGB Model)", print.auc =
 5.3.3 Fairness analysis for XGB:
 ---------------------------------
 
-## ROC-AUC parity:
+### ROC-AUC parity:
 
 ```{r warning=FALSE}
 roc_auc_par_xgb <- roc_parity(data         = test, 
@@ -645,7 +645,7 @@ roc_auc_par_xgb$ROCAUC_plot +
 ```
 
 
-## Predictive rate parity
+### Predictive rate parity
 
 ```{r}
 pred_par_xgb <- pred_rate_parity(
@@ -667,7 +667,7 @@ pred_par_xgb$Metric_plot
 ```
 
 
-## Demographic parity
+### Demographic parity
 
 
 ```{r}
@@ -684,7 +684,7 @@ dem_par_xgb$Metric
 ```
 
 
-## Accuracy parity
+### Accuracy parity
 
 
 ```{r}
@@ -698,7 +698,7 @@ acc_par_xgb$Metric
 ```
 
 
-## Specificity parity
+### Specificity parity:
 
 ```{r}
 sp_par_xgb <- spec_parity(data         = test, 
@@ -712,7 +712,7 @@ sp_par_xgb$Metric
 ```
 ==============================================================================================================================================================================================================================
 ========================
-## 6. Feature importance: 
+# 6. Feature importance: 
 =========================
 ```{r}
 feature_importance_lr <- varImp(logistic_model)
