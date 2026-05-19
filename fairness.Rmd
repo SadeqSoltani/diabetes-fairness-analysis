@@ -2,8 +2,9 @@
 title: "Fairness Analysis"
 output: html_notebook
 ---
-
-#libraries and load dataset
+--------------------------------
+1. libraries and load dataset:
+---------------------------------
 
 ```{r}
 library(tidyverse)
@@ -29,10 +30,11 @@ library(fairness)
 ```{r}
 mydata <- read.csv("Pima Indians Diabetes.csv")
 ```
+==================================================================================================================================================================================
 
-
-#dataset overview:
-
+----------------------
+2. Dataset overview:
+-----------------------
 
 ```{r}
 summary(mydata)
@@ -52,15 +54,12 @@ mydata %>%
   ))) %>%
   pivot_longer(cols = everything(), names_to = c("Column", ".value"), names_sep = "_")
 
-
-
 ```
+==========================================================================================================================================================
 
+3. Data Preparation: 
 
-
-#Data Preparation: 
-
-##change variable type
+3.1 Change variable type:
 
 
 ```{r}
@@ -80,14 +79,11 @@ diabetes_levels <- data.frame(
 # Print the table
 print(diabetes_levels)
 
-
-
-
-
 ```
 
-
-##NA values
+-------------------------
+3.2 Check NA values:
+----------------------------
 
 ```{r}
 missing_values <- colSums(is.na(mydata))
@@ -161,9 +157,9 @@ outlier_summary <- mydata %>%
 print(outlier_summary)
 
 ```
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-
-# descriptive analytics
+# Descriptive analytics
 
 
 ##pie chart for distribution of patients
@@ -285,10 +281,10 @@ mydata_long %>%
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))
 
 ```
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Predictive Analysis and fairbess metrices: 
 
-
-
-#Logestic regresion:(linear model)
+## Logestic regresion:(linear model)
 
 ```{r}
 set.seed(123)
@@ -349,7 +345,7 @@ plot(roc_curve_logestic, col = "blue", main = "ROC_AUC Curve (Logestic Regressio
 ```
 
 
-#fairness analyses in logestic regression model:
+### fairness analyses in logestic regression model:
 
 
 
@@ -374,7 +370,7 @@ roc_auc_par_lr$ROCAUC_plot +
 
 
 
-##Predictive rate parity:
+#### Predictive rate parity:
 
 ```{r}
 pred_par_lr <- pred_rate_parity(
@@ -698,26 +694,20 @@ sp_par_xgb$Metric
 
 # feature importance: 
 
-
 ```{r}
 feature_importance_lr <- varImp(logistic_model)
 print(feature_importance_lr)
 ```
-
-
 
 ```{r}
 feature_importance_rf <- varImp(rf_model)
 print(feature_importance_rf)
 ```
 
-
 ```{r}
 feature_importance_xgb <- varImp(XGB_model)
 print(feature_importance_xgb)
 ```
-
-
 
 ```{r}
 
