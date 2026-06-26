@@ -1,4 +1,3 @@
-<img width="1000" height="500" alt="image" src="https://github.com/user-attachments/assets/0d686946-f555-4705-badc-109821d6b88c" />
 
 #  Fairness Analysis in Diabetes Prediction
 
